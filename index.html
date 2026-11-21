@@ -857,7 +857,7 @@ buildTerrain();
 buildLakes();
 renderer.render(scene,camera);
 window.__scaffoldReady=true;
-console.log('SCAFFOLD_OK');
+/* scene build finished - the UI in the side panel drives everything from here */
 /*__CHUNK3__*/
 /* ============================== site helpers ============================== */
 const SITE={};
@@ -2967,7 +2967,7 @@ const SAIL=(()=>{
   return {curve, len:curve.getLength()};
 })();
 const sailLook=new THREE.Vector3();
-window.__SAIL=SAIL;
+window.__dbg.SAIL=SAIL;
 function updateSail(dt){
   if(!state.sail) return;
   if(state.sailPlay) state.sailT=(state.sailT+dt*0.010)%1;
@@ -3270,12 +3270,6 @@ buildTajGarden();
        is not a valid rotation and renders as a dark slab.
      · window.__dbg exposes scene/camera/MONS/SITE for the test harnesses.
    ========================================================================== */
-
-
-
-
-
-
 
 </script>
 </body>
