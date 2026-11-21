@@ -4,7 +4,7 @@ const args=['--no-sandbox','--disable-setuid-sandbox','--enable-unsafe-swiftshad
 const s=http.createServer((q,r)=>{let p=q.url.split('?')[0];if(p==='/')p='/index.html';fs.readFile(path.join(ROOT,p),(e,d)=>{if(e){r.writeHead(404);r.end('nf');return;}r.writeHead(200,{'Content-Type':'text/html'});r.end(d);});});
 (async()=>{
  await new Promise(r=>s.listen(8796,'0.0.0.0',r)); console.log('UP');
- const b=await puppeteer.launch({headless:'new',env:{...process.env,LD_LIBRARY_PATH:'/home/user/pylibs/usr/lib/x86_64-linux-gnu:/home/user/pylibs/lib/x86_64-linux-gnu'},args});
+ const b=await puppeteer.launch({headless:'new',env:{...process.env,LD_LIBRARY_PATH:'/home/user/.cache/chromedeps/usr/lib/x86_64-linux-gnu:/home/user/pylibs/lib/x86_64-linux-gnu'},args});
  const p=await b.newPage();
  await p.setViewport({width:1440,height:810});
  p.on('console',m=>console.log('LOG',m.text()));

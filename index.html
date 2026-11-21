@@ -852,6 +852,19 @@ function buildTaj(){
   const MB=M.marble;
   /* --- river terrace + plinth --- */
   platform(bag,0,0,0, 118,104,3.2, M.marbleSoft);
+  /* revetment: the terrace is carried down to the ground, never left floating */
+  for(let k=0;k<4;k++)
+    bag.add(new THREE.BoxGeometry(122,5.2,108), k===0?M.paleSand:M.sandstone, mat4(0,-2.6-k*5.2,0));
+  /* shallow arched niches along the river face of the revetment */
+  for(let k=-4;k<=4;k++){
+    const zz=56;
+    bag.add(archFrameGeo(9,7.0,1.4,1.0,0.7), M.paleSand, mat4(k*12,-6.0,zz));
+    bag.add(new THREE.PlaneGeometry(7.4,5.6), M.woodDark, mat4(k*12,-6.4,zz-0.1));
+  }
+  /* riverfront apron and ghat steps down to the water */
+  bag.add(new THREE.BoxGeometry(150,1.2,34), M.paleSand, mat4(0,-0.4,70));
+  for(let k=0;k<7;k++)
+    bag.add(new THREE.BoxGeometry(26-k*1.2,1.0,3.2), M.paleSand, mat4(0,-0.6-k*1.0,88+k*3.0));
   platform(bag,0,3.2,0, 104,92,1.5, MB);
   /* stepped plinth (takhtgah) */
   platform(bag,0,4.7,0, 92,82,2.0, MB);
@@ -2138,13 +2151,13 @@ window.__monCount=MONS.length;
 let VEG=null;
 const VEG_TYPES=[
   /* Indian side: mango / neem / banyan, palms, and the cypress rows of the Taj */
-  {id:'mango',  side:'in', trunkH:3.0, crown:'sphere', r:4.6, c1:0x3d6b32, c2:0x6b9440, n:4200, dmin:20, dmax:620},
-  {id:'palm',   side:'in', trunkH:8.5, crown:'palm',   r:3.4, c1:0x4a7a38, c2:0x81a84c, n:1100, dmin:18, dmax:420},
-  {id:'banyan', side:'in', trunkH:4.0, crown:'wide',   r:7.4, c1:0x335c2c, c2:0x557f36, n:900,  dmin:22, dmax:520},
+  {id:'mango',  side:'in', trunkH:3.0, crown:'sphere', r:4.6, c1:0x3d6b32, c2:0x6b9440, n:2600, dmin:20, dmax:600},
+  {id:'palm',   side:'in', trunkH:8.5, crown:'palm',   r:3.4, c1:0x4a7a38, c2:0x81a84c, n:760,  dmin:18, dmax:420},
+  {id:'banyan', side:'in', trunkH:4.0, crown:'wide',   r:7.4, c1:0x335c2c, c2:0x557f36, n:600,  dmin:22, dmax:520},
   /* German side: beech, spruce, poplar, and limes along the boulevards */
-  {id:'beech',  side:'de', trunkH:4.6, crown:'sphere', r:5.2, c1:0x33582f, c2:0x5a7f3a, n:4600, dmin:20, dmax:680},
-  {id:'spruce', side:'de', trunkH:6.0, crown:'cone',   r:3.6, c1:0x24462b, c2:0x355e34, n:3400, dmin:24, dmax:900},
-  {id:'poplar', side:'de', trunkH:7.0, crown:'tall',   r:2.8, c1:0x46693a, c2:0x6d9048, n:1200, dmin:20, dmax:520},
+  {id:'beech',  side:'de', trunkH:4.6, crown:'sphere', r:5.2, c1:0x33582f, c2:0x5a7f3a, n:2800, dmin:20, dmax:660},
+  {id:'spruce', side:'de', trunkH:6.0, crown:'cone',   r:3.6, c1:0x24462b, c2:0x355e34, n:2000, dmin:24, dmax:880},
+  {id:'poplar', side:'de', trunkH:7.0, crown:'tall',   r:2.8, c1:0x46693a, c2:0x6d9048, n:820,  dmin:20, dmax:520},
 ];
 function crownGeo(kind,r){
   if(kind==='cone')  return new THREE.ConeGeometry(r, r*3.0, 6, 1);
@@ -2791,8 +2804,8 @@ buildVehicles();
 /* ============================== camera presets ============================== */
 const VIEWS=[
   {id:'hero',    name:'Steamer deck',    pos:[-16,19.5,-122],  tgt:[90,52,250]},
-  {id:'tajBank', name:'Taj, far bank',   pos:[-6,23,244],    tgt:[150,54,250]},
-  {id:'tajGate', name:'Garden, from gate', pos:[150,21,98],  tgt:[150,46,250]},
+  {id:'tajBank', name:'Taj, far bank',   pos:[34,30,252],    tgt:[150,48,250]},
+  {id:'tajGate', name:'Garden, from gate', pos:[362,118,250], tgt:[150,8,250]},
   {id:'inAerial',name:'India aerial',    pos:[-430,360,1180], tgt:[330,10,620]},
   {id:'deAerial',name:'Germany aerial',  pos:[700,420,1500],  tgt:[-330,30,760]},
   {id:'gates',   name:'Harbour gates',   pos:[0,52,-236],    tgt:[0,30,20]},
@@ -3066,27 +3079,54 @@ function buildTajGarden(){
     addChhatri(bag, sx*21, 18.0, GZ, 1.9, MS, MB);
   }
   for(let i=-3;i<=3;i++) addChhatri(bag, i*5.2, 22.0, GZ, 1.35, MS, MB);
-  /* the mosque and its mirror-image jawab, red sandstone with white domes */
+  /* the mosque and its mirror-image jawab: red sandstone with white domes,
+     flanking the mausoleum along the terrace, fronts turned towards it */
   for(const sx of [-1,1]){
-    const mx=0, mz=sx*62;
-    bag.add(new THREE.BoxGeometry(26,12,20), RS, mat4(mx,7.4,mz));
-    bag.add(new THREE.BoxGeometry(28,1.1,22), MS, mat4(mx,13.5,mz));
-    for(let k=-1;k<=1;k++) bag.add(onionDomeGeo(3.9,4.4,16), MB, mat4(mx+k*8.2,14.6,mz));
-    for(let k=-1;k<=1;k++) bag.add(finialGeo(2.4), M.goldDim, mat4(mx+k*8.2,18.9,mz));
-    bag.add(archFrameGeo(9,9.4,5.0,1.6,0.9), M.redSand, mat4(mx+sx*10.2,3.4,mz, sx*Math.PI/2));
-    bag.add(archGeo(7.6,8.2,4.4,1.4), M.woodDark, mat4(mx+sx*9.6,3.4,mz, sx*Math.PI/2));
-    for(const dx of [-9,9]) bag.add(new THREE.CylinderGeometry(1.05,1.15,11,10), MS, mat4(mx+sx*7.6,6.4,mz+dx));
-    bag.add(new THREE.PlaneGeometry(15,1.7), M.script, mat4(mx+sx*10.3,12.2,mz, sx*Math.PI/2));
-    /* outer arcade wall along the terrace edge */
-    bag.add(new THREE.BoxGeometry(3.0,7.5,20), RS, mat4(sx*44,4.4,mz+15));
+    const mx=sx*76, mz=-4;
+    /* their own plinth, stepping up out of the ground towards the terrace */
+    bag.add(new THREE.BoxGeometry(30,6.2,46), RS, mat4(mx,3.1,mz));
+    bag.add(new THREE.BoxGeometry(32,1.1,48), MS, mat4(mx,6.5,mz));
+    /* main hall: long axis along the terrace, rear bays towards the wall */
+    bag.add(new THREE.BoxGeometry(18,10.0,30), RS, mat4(mx-sx*2.0,12.0,mz));
+    bag.add(new THREE.BoxGeometry(19.6,1.1,31.6), MS, mat4(mx-sx*2.0,17.5,mz));
+    bag.add(new THREE.BoxGeometry(20.6,0.6,32.6), MS, mat4(mx-sx*2.0,18.2,mz));
+    /* three white domes along the long axis, with gilded finials */
+    for(let k=-1;k<=1;k++){
+      bag.add(onionDomeGeo(4.0,4.6,16), MB, mat4(mx-sx*2.0,18.8,mz+k*9.6));
+      bag.add(new THREE.CylinderGeometry(4.2,4.3,1.5,14), MS, mat4(mx-sx*2.0,17.8,mz+k*9.6));
+      bag.add(finialGeo(2.6), M.goldDim, mat4(mx-sx*2.0,23.0,mz+k*9.6));
+    }
+    /* pishtaq on the inner face, facing the mausoleum */
+    const ang=-sx*Math.PI/2, fx=mx-sx*12.0;
+    bag.add(archFrameGeo(9,8.6,5.0,1.6,0.9), M.redSand, mat4(fx,7.0,mz,ang));
+    bag.add(archGeo(7.4,7.6,4.4,1.5), M.woodDark, mat4(mx-sx*11.4,7.0,mz,ang));
+    bag.add(new THREE.PlaneGeometry(14,1.6), M.script, mat4(fx,15.2,mz,ang));
+    /* two slender minarets on the river corners */
+    for(const sz of [-1,1]){
+      const px=mx-sx*11.5, pz=mz+sz*15.5;
+      bag.add(new THREE.CylinderGeometry(1.6,2.0,7.0,10), RS, mat4(px,9.4,pz));
+      bag.add(new THREE.CylinderGeometry(0.95,1.18,9.0,10), MS, mat4(px,17.0,pz));
+      bag.add(new THREE.CylinderGeometry(1.55,1.55,0.7,10), MS, mat4(px,21.7,pz));
+      bag.add(onionDomeGeo(1.35,2.0,10), MB, mat4(px,23.0,pz));
+      bag.add(finialGeo(1.6), M.goldDim, mat4(px,25.0,pz));
+    }
+    /* cypresses hugging the plinth, screening the garden wall */
+    for(let k=-1;k<=1;k++) for(const sd of [-1,1]){
+      if(!k && sd>0) continue;
+      bag.add(new THREE.CylinderGeometry(0.24,0.32,2.2,5), M.trunk, mat4(mx+sd*15.5,1.1,mz+k*13));
+      const cy=new THREE.ConeGeometry(1.9,10.5,7); cy.translate(0,7.0,0);
+      bag.add(cy, M.leafDark, mat4(mx+sd*15.5,0.6,mz+k*13));
+    }
   }
   /* boundary wall with corner pavilions, and the river terrace parapet */
   for(const sx of [-1,1]){
-    bag.add(new THREE.BoxGeometry(3.4,5.4,(GZ0-GZ1)+22), RS, mat4(sx*(GW/2+2.0),2.6,(GZ0+GZ1)/2-6));
+    bag.add(new THREE.BoxGeometry(3.4,5.4,(GZ0-GZ1)+22), RS, mat4(sx*(GW/2+16.0),2.6,(GZ0+GZ1)/2-6));
     for(const cq of [GZ0+2, GZ0-46, GZ0-94, GZ1-8]){
-      bag.add(new THREE.BoxGeometry(7,7.5,7), RS, mat4(sx*(GW/2+2.0),3.8,cq));
-      bag.add(onionDomeGeo(3.4,3.6,12), MS, mat4(sx*(GW/2+2.0),7.2,cq));
+      bag.add(new THREE.BoxGeometry(7,7.5,7), RS, mat4(sx*(GW/2+16.0),3.8,cq));
+      bag.add(onionDomeGeo(3.4,3.6,12), MS, mat4(sx*(GW/2+16.0),7.2,cq));
     }
+    /* the courtyard edge between wall and plinth: paved strips either side of the axis */
+    bag.add(new THREE.BoxGeometry(16,0.5,(GZ0-GZ1)+20), MS, mat4(sx*(GW/2+7.4),0.9,(GZ0+GZ1)/2-6));
   }
   /* the river terrace parapet, seen from the water */
   bag.add(new THREE.BoxGeometry(120,1.5,1.4), MS, mat4(0,4.0,52));
@@ -3094,7 +3134,39 @@ function buildTajGarden(){
   bag.build(gg);
 }
 buildTajGarden();
-//__CHUNK10__
+/* ============================================================================
+   Two Rivers — India x Germany
+   One file, no assets. Three.js from the import map at the top.
+
+   Layout of this file
+     1  shell      HTML, CSS, panel markup, favicon, import map, composer
+     2  helpers    GeoBag (merge-on-build), arch/dome/finial kit, noise, math
+     3  world      river courses + RiverField, terrain (SITES heights), sky,
+                   water shader, mist
+     4  monuments   newMon/platform/arcade, buildTaj + the 8 anchor builders
+     5  archetypes the 17 paired-tower / dome / temple builders
+     6  scenery    vegetation, vineyards, banks and reeds, settlements, ways
+     7  life       boats and wakes, people, birds, traffic, trains
+     8  camera/UI  VIEWS, PAIRS, goTo/stepTween, SAIL, LIGHT_MODES, QUALITY,
+                   buildUI
+     9  the Taj    char-bagh garden, reflecting channel, great gate,
+                   mosque and jawab, boundary walls
+    10  notes      (this block)
+
+   Things worth knowing before editing
+     · Every monument is a THREE.Group placed by newMon(); geometry is merged
+       into a handful of buffers per group by GeoBag, so draw calls stay low.
+     · Quality only toggles fine ornament (o.fine): at Low every monument
+       keeps its silhouette.
+     · DECK_GROUP (the steamer deck) is a scene child, shown only when the
+       camera is within 30 units of HERO_POS and sail mode is off.
+     · stepTween is fed real elapsed time (rawDt) - feeding the clamped
+       simulation dt makes preset flights take tens of seconds.
+     · Mirrors are clones scaled (1,-1,-1) about WATER_Y; a (1,-1,1) scale
+       is not a valid rotation and renders as a dark slab.
+     · window.__dbg exposes scene/camera/MONS/SITE for the test harnesses.
+   ========================================================================== */
+
 
 
 

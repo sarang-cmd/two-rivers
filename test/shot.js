@@ -9,7 +9,7 @@ const srv=http.createServer((q,r)=>{let p=decodeURIComponent(q.url.split('?')[0]
 (async()=>{
   await new Promise(r=>srv.listen(PORT,'0.0.0.0',r)); console.log('SERVER_UP');
   const b=await puppeteer.launch({headless:'new',
-    env:{...process.env,LD_LIBRARY_PATH:'/home/user/pylibs/usr/lib/x86_64-linux-gnu:/home/user/pylibs/lib/x86_64-linux-gnu'},
+    env:{...process.env,LD_LIBRARY_PATH:'/home/user/.cache/chromedeps/usr/lib/x86_64-linux-gnu:/home/user/pylibs/lib/x86_64-linux-gnu'},
     args:['--no-sandbox','--disable-setuid-sandbox','--enable-unsafe-swiftshader','--use-gl=angle','--use-angle=swiftshader','--window-size=1440,810']});
   const p=await b.newPage();
   await p.setViewport({width:1440,height:810});
