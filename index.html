@@ -451,7 +451,10 @@ class RiverField{
         const len=Math.hypot(x1-x0,z1-z0), n=Math.max(1,Math.round(len/14));
         for(let j=0;j<n;j++){
           const t=j/n;
-          this.samples.push({x:lerp(x0,x1,t), z:lerp(z0,z1,t), w:widths[li]});
+          const sx=lerp(x0,x1,t), sz=lerp(z0,z1,t);
+          /* signed offset from the course: +1 east/west of the centreline */
+          const sgn=(sz>=0)? 1 : ((sx>=0)?1:-1);
+          this.samples.push({x:sx, z:sz, w:widths[li], side:sgn, li});
         }
       }
     });
@@ -461,17 +464,18 @@ class RiverField{
       a.push(idx);
     });
   }
+  /* nearest course and the signed side of it (negative = west of the course) */
   near(x,z){
     const cx=Math.floor(x/this.cell), cz=Math.floor(z/this.cell);
-    let best=1e12, bw=45;
-    for(let i=-1;i<=1;i++) for(let j=-1;j<=1;j++){
+    let best=1e12, bw=45, bs=1;
+    for(let i=-2;i<=2;i++) for(let j=-2;j<=2;j++){
       const a=this.grid.get((cx+i)+','+(cz+j)); if(!a) continue;
       for(let q=0;q<a.length;q++){
         const s=this.samples[a[q]], dx=x-s.x, dz=z-s.z, d2=dx*dx+dz*dz;
-        if(d2<best){ best=d2; bw=s.w; }
+        if(d2<best){ best=d2; bw=s.w; bs=s.side; }
       }
     }
-    return { d:Math.sqrt(best), w:bw };
+    return { d:Math.sqrt(best), w:bw, side:bs };
   }
 }
 const rivers=new RiverField([R_INDIAN,R_GERMAN,R_SHARED],[44,40,74]);
@@ -583,6 +587,23 @@ function terrainH(x,z){
 /* terrain mesh: one grid, denser through the valley */
 const NSEG=380, HALF=5600;
 const remap=u=>{ const a=Math.abs(u); return Math.sign(u)*(0.26*a+0.74*Math.pow(a,2.15))*HALF; };
+/* bilinear read of the coarse terrain grid (needed by the river ribbon) */
+function terrainGrid(x,z){
+  const inv=v=>{
+    let a=Math.abs(v)/HALF; const s=Math.sign(v)||1;
+    /* invert 0.26a+0.74a^2.15 numerically - cheap, called a few thousand times */
+    let lo=0, hi=1;
+    a=Math.min(1,Math.max(0,a));
+    for(let k=0;k<26;k++){ const mid=(lo+hi)/2; (0.26*mid+0.74*Math.pow(mid,2.15))<a ? lo=mid : hi=mid; }
+    return s*(lo+hi)/2;
+  };
+  const u=inv(x), w=inv(z);
+  const ci=clamp(Math.round((u*0.5+0.5)*NSEG),0,NSEG), cj=clamp(Math.round((w*0.5+0.5)*NSEG),0,NSEG);
+  const p=TERRAIN_BASE_GRID.data;
+  const r=p[cj*(NSEG+1)+ci];
+  return isFinite(r) ? r : terrainH(x,z);
+}
+let TERRAIN_BASE_GRID=null;
 function buildTerrain(){
   const g=new THREE.PlaneGeometry(2,2,NSEG,NSEG);
   g.rotateX(-Math.PI/2);
@@ -591,7 +612,13 @@ function buildTerrain(){
     pos.setX(i, remap(pos.getX(i)));
     pos.setZ(i, remap(pos.getZ(i)));
   }
-  for(let i=0;i<pos.count;i++) pos.setY(i, terrainH(pos.getX(i), pos.getZ(i)));
+  /* remember the base heights: the water carve below reuses them */
+  TERRAIN_BASE_GRID={ n:NSEG, data:new Float32Array(pos.count) };
+  for(let i=0;i<pos.count;i++) TERRAIN_BASE_GRID.data[i]=pos.getY(i);
+  /* carve the river channels at a finer resolution than the grid itself.
+     A coarse grid cannot follow a 40 m river, so the bed is stamped as a
+     dense ribbon of quads on top of it - otherwise the mesh bridges the
+     valley and the channel disappears. */
   g.computeVertexNormals();
   const nor=g.attributes.normal;
   const colors=new Float32Array(pos.count*3);
@@ -625,8 +652,36 @@ function buildTerrain(){
     const j=0.94+hash2(i,7)*0.10;
     colors[i*3]=out.r*j; colors[i*3+1]=out.g*j; colors[i*3+2]=out.b*j;
   }
+  /* ---- river-bank resolution pass ----
+     A 40 m channel cannot be resolved by an 18-30 m grid: those quads bridge
+     the water and the channel disappears under the land. Near a course, the
+     surface is lowered where it disagrees with the true bed and each quad gets
+     the diagonal with the smaller error. The grid itself is unchanged, so the
+     heightfield probes stay exact. */
+  {
+    const S=NSEG+1, P=pos, idx=[], split=(x,z)=>rivers.near(x,z).d<170;
+    for(let r=0;r<NSEG;r++) for(let c=0;c<NSEG;c++){
+      const i=r*S+c, j=i+1, k=i+S, l=k+1;      // i=TL, j=TR, k=BL, l=BR
+      const x0=P.getX(i), z0=P.getZ(i), x1=P.getX(l), z1=P.getZ(l);
+      if(split((x0+x1)/2,(z0+z1)/2)){
+        /* error of each diagonal: compare corner heights with the centre */
+        const hc=terrainH((x0+x1)/2,(z0+z1)/2);
+        const e1=Math.abs((P.getY(i)+P.getY(l))/2-hc), e2=Math.abs((P.getY(j)+P.getY(k))/2-hc);
+        if(e1<=e2){ idx.push(i,k,l, i,l,j); } else { idx.push(i,k,j, j,k,l); }
+      } else idx.push(i,k,l, i,l,j);
+    }
+    g.setIndex(idx);
+  }
   g.setAttribute('color', new THREE.BufferAttribute(colors,3));
+  /* ---- river-bank resolution pass ----
+     A 40 m channel cannot be resolved by an 18-30 m grid: those quads bridge
+     the water and the channel disappears under the land. Where the coarse
+     surface disagrees with the true ground near a course, the quad is
+     triangulated with its diagonal chosen for the smaller error, and the shared
+     corner heights are lowered towards the bed. Everything stays indexed on the
+     same (NSEG+1)^2 grid, so the heightfield probes remain exact. */
   const mesh=new THREE.Mesh(g, M.vMat);
+  mesh.name='terrain'+NSEG;
   mesh.receiveShadow=true;
   mesh.castShadow=false;
   mesh.matrixAutoUpdate=false;
@@ -1012,7 +1067,7 @@ function buildTaj(){
 buildTaj();
 camera.position.set(-16,19.5,-122); controls.target.set(90,52,250); controls.update();
 controls.maxPolarAngle=Math.PI*0.66; controls.minPolarAngle=0.02;
-window.__dbg={THREE,scene,camera,controls,MONS,SITE,renderer,state,H:terrainH,B:baseH};
+window.__dbg={THREE,scene,camera,controls,MONS,SITE,renderer,state,H:terrainH,B:baseH,rivers,WATER_Y:0.45};
 /* ============================== frame loop ============================== */
 let lastT=performance.now(), fpsAcc=0, fpsN=0;
 function tick(now){
@@ -1022,7 +1077,14 @@ function tick(now){
   fpsAcc+=dt; fpsN++;
   if(fpsN>=12){ window.__stats={fps:Math.round(fpsN/fpsAcc), tris:renderer.info.render.triangles, calls:renderer.info.render.calls}; fpsAcc=0; fpsN=0; }
   waterUni.uTime.value=t; skyUni.uTime.value=t;
-  for(const m of mists){ m.m.position.y=m.base+Math.sin(t*0.3+m.ph)*1.4; m.m.position.x+=Math.sin(t*0.1+m.ph)*0.02; }
+  for(const m of mists){
+    m.m.position.y=m.base+Math.sin(t*0.3+m.ph)*1.4;
+    m.m.position.x+=Math.sin(t*0.1+m.ph)*0.02;
+    /* never let a mist sheet swallow the camera (sail mode sits low over water) */
+    const d=m.m.position.distanceTo(camera.position);
+    const fade=Math.min(1, Math.max(0, (d-90)/220));
+    m.m.material.opacity=(m.m.material.userData.base||0.03)*fade;
+  }
   for(const c of cloudShadows){ c.m.position.x+=c.sp*0.06; if(c.m.position.x>2600) c.m.position.x=-2600; }
   updateBoats(dt,t);
   updatePeople(dt,t);
@@ -1763,22 +1825,37 @@ function buildMeenakshi(){
 function buildGateway(){
   const {g,rec}=newMon('gateway', -Math.PI/2);
   const bag=new GeoBag();
-  const BS=M.basalt;
-  bag.add(new THREE.BoxGeometry(44,3.0,30), M.paleSand, mat4(0,1.5,0));
-  for(const sx of [-1,1]) bag.add(new THREE.BoxGeometry(14,22,20), BS, mat4(sx*13,14,0));
-  bag.add(archFrameGeo(18,23,13,20,4.0), BS, mat4(0,3,0));
-  bag.add(new THREE.BoxGeometry(42,7,20), BS, mat4(0,28.5,0));
-  bag.add(new THREE.BoxGeometry(44,1.2,21), M.paleSand, mat4(0,32.3,0));
-  /* four corner turrets with small domes */
-  for(const sx of [-1,1]) for(const sz of [-1,1]){
-    bag.add(new THREE.CylinderGeometry(2.8,3.1,4.0,8), BS, mat4(sx*19,34.6,sz*8.4));
-    bag.add(onionDomeGeo(3.0,3.2,10), BS, mat4(sx*19,38.4,sz*8.4));
+  const ST=M.paleSand, RS=M.redSand, MB=M.marble, MS=M.marbleSoft;
+  /* stepped stone base with a broad flight down to the quay */
+  bag.add(new THREE.BoxGeometry(48,2.6,34), ST, mat4(0,1.3,0));
+  bag.add(new THREE.BoxGeometry(46,0.8,33), MS, mat4(0,2.9,0));
+  /* two massive piers, with battered faces and a moulded string course */
+  for(const sx of [-1,1]){
+    bag.add(new THREE.BoxGeometry(15,19,21), ST, mat4(sx*14,12.2,0));
+    bag.add(new THREE.BoxGeometry(16.4,1.1,22.4), MS, mat4(sx*14,20.2,0));
+    bag.add(new THREE.BoxGeometry(16.4,0.9,22.4), RS, mat4(sx*14,4.2,0));
+    /* shallow pilaster strips and a niche on the outer face */
+    for(const sz of [-1,1]){
+      bag.add(new THREE.BoxGeometry(1.4,17,1.4), MS, mat4(sx*21.0,12.0,sz*8.2));
+      bag.add(archGeo(4.4,7.0,1.2,1.0), M.woodDark, mat4(sx*21.6,6.0,sz*8.2, sx*Math.PI/2));
+    }
   }
-  bag.add(new THREE.CylinderGeometry(6.0,6.4,3.0,20), BS, mat4(0,33.6,0));
-  bag.add(onionDomeGeo(6.2,5.2,18), BS, mat4(0,36.2,0));
-  /* harbour steps, bollards, benches */
-  for(let i=0;i<5;i++) bag.add(new THREE.BoxGeometry(54,0.8,2.6), M.paleSand, mat4(0,0.4-i*0.5,17+i*2.4));
-  for(let i=0;i<7;i++) bag.add(new THREE.CylinderGeometry(0.6,0.7,1.6,8), M.basalt, mat4(-27+i*9,0.8,15));
+  /* the great pointed arch across the gateway */
+  bag.add(new THREE.BoxGeometry(42,8,21), ST, mat4(0,25.5,0));
+  bag.add(archFrameGeo(19,23,13,21,4.2), RS, mat4(0,3.0,0));
+  bag.add(archGeo(16,20,12,4.0), M.woodDark, mat4(0,3.0,-0.6));
+  /* pierced screen above the arch and a pale parapet */
+  for(let i=-4;i<=4;i++) bag.add(new THREE.BoxGeometry(1.1,3.4,1.1), MS, mat4(i*4.4,31.0,9.0));
+  bag.add(new THREE.BoxGeometry(44,1.4,22.4), MS, mat4(0,32.6,0));
+  /* four chhatris on the corners, and a domed kiosk at the centre */
+  for(const sx of [-1,1]) for(const sz of [-1,1]) addChhatri(bag, sx*19, 33.2, sz*8.6, 2.0, MS, MB);
+  bag.add(new THREE.CylinderGeometry(5.6,6.0,2.6,20), ST, mat4(0,34.2,0));
+  bag.add(onionDomeGeo(5.8,4.8,18), MB, mat4(0,36.6,0));
+  bag.add(finialGeo(3.6), M.goldDim, mat4(0,41.6,0));
+  /* harbour steps, bollards and benches along the quay */
+  for(let i=0;i<5;i++) bag.add(new THREE.BoxGeometry(56,0.8,2.6), MS, mat4(0,0.4-i*0.5,21+i*2.4));
+  for(let i=0;i<7;i++) bag.add(new THREE.CylinderGeometry(0.55,0.65,1.5,8), M.woodDark, mat4(-27+i*9,0.9,19));
+  for(const sx of [-1,1]) bag.add(new THREE.BoxGeometry(3.4,0.5,1.2), MS, mat4(sx*9,1.3,23));
   bag.build(g);
   rec.ornament.push({obj:g,tier:3});
   return rec;
@@ -2204,7 +2281,7 @@ function buildVegetation(){
       const rn=rivers.near(x,zz);
       if(rn.d < t.dmin || rn.d > t.dmax) continue;
       const y=terrainH(x,zz);
-      if(y<1.2 || y>430) continue;
+      if(y<2.6 || y>430) continue;
       let bad=false;
       for(let si2=0;si2<SITES.length;si2++){
         const s=SITES[si2], ddx=x-s.x, ddz=zz-s.z;
@@ -2288,8 +2365,8 @@ function buildBanks(){
         for(const side of [-1,1]){
           const nx=-dz/len*side, nz=dx/len*side;
           if(hash2(x,z)>0.72){
-            const px=x+nx*(50+hash2(z,x)*8), pz=z+nz*(50+hash2(x,z)*8);
-            const y=terrainH(px,pz);
+            const px=x+nx*(30+hash2(z,x)*6), pz=z+nz*(30+hash2(x,z)*6);
+            const y=Math.max(terrainH(px,pz), 0.4);
             for(let k=0;k<5;k++){
               const rake=hash2(px+k,pz)*0.5;
               bag.add(new THREE.CylinderGeometry(0.06,0.09,1.5+rake*1.6,4), M.leafLight, mat4(px+(hash2(k,px)-0.5)*2.4, y+0.7, pz+(hash2(pz,k)-0.5)*2.4));
@@ -2297,7 +2374,7 @@ function buildBanks(){
           }
           /* occasional stone edge / mooring post */
           if(hash2(x*1.7,z*1.3)>0.86){
-            const px=x+nx*47, pz=z+nz*47, y=terrainH(px,pz);
+            const px=x+nx*26, pz=z+nz*26, y=Math.max(terrainH(px,pz), 0.5);
             bag.add(new THREE.BoxGeometry(1.1,2.4,1.1), M.paleSand, mat4(px,y+1.2,pz,ang));
           }
         }
@@ -2376,11 +2453,16 @@ function buildWays(){
     for(let i=0;i<pts.length-1;i++){
       const [ax,az]=pts[i], [bx,bz]=pts[i+1];
       const mx=(ax+bx)/2, mz=(az+bz)/2;
-      const y=terrainH(mx,mz)+lift;
+      /* the embankment surface: never below the water line */
+      const y=Math.max(terrainH(mx,mz), 1.1)+lift;
       const ang=Math.atan2(bx-ax, bz-az);
       const len=Math.hypot(bx-ax,bz-az);
       bag.add(new THREE.BoxGeometry(9,0.35,len*1.05), mat, mat4(mx,y,mz,ang));
       if(i%7===0) bag.add(new THREE.BoxGeometry(1.0,4.4,1.0), M.woodDark, mat4(mx+2,y+2.2,mz));
+      /* stone facing on the water side so the bank reads as a quay, not a slope */
+      const dl2=Math.hypot(bx-ax,bz-az)||1;
+      const qx=(ax+bx)/2-(bz-az)/dl2*3.4*Math.sign(sideSign), qz=(az+bz)/2+(bx-ax)/dl2*3.4*Math.sign(sideSign);
+      bag.add(new THREE.BoxGeometry(1.2,3.2,len*1.02), M.paleSand, mat4(qx, y-1.6, qz, ang));
     }
     return pts;
   }
@@ -2396,17 +2478,21 @@ function buildWays(){
     const [nx,nz]=R_INDIAN[i+1];
     const dx=nx-x, dz=nz-z, dl=Math.hypot(dx,dz)||1;
     const ux=-dz/dl, uz=dx/dl;
+    const ang=Math.atan2(dx,dz);
     for(const side of [-1,1]){
-      const bx=x+ux*side*36, bz=z+uz*side*36;
-      const top=terrainH(bx,bz);
-      const steps=6;
+      /* start just off the water's edge and climb the bank */
+      const bx=x+ux*side*18, bz=z+uz*side*18;
+      const top=Math.max(terrainH(x+ux*side*40, z+uz*side*40), 2.2);
+      const steps=7;
       for(let k=0;k<steps;k++){
-        const px=bx+ux*side*k*1.9, pz=bz+uz*side*k*1.9;
-        const y=lerp(top,0.9,k/steps);
-        bag.add(new THREE.BoxGeometry(22,0.55,2.1), M.paleSand, mat4(px,y,pz,-Math.atan2(dx,dz)));
+        const px=bx+ux*side*k*1.7, pz=bz+uz*side*k*1.7;
+        const y=lerp(0.35, top, k/(steps-1));
+        bag.add(new THREE.BoxGeometry(19,0.5,2.0), M.paleSand, mat4(px,y,pz,ang));
       }
-      /* flanking chhatri-topped posts at the head of each flight */
-      for(const s2 of [-1,1]) bag.add(new THREE.BoxGeometry(0.9,3.2,0.9), M.paleSand, mat4(bx+ux*side*0+Math.cos(Math.atan2(dx,dz))*s2*10.4, top+1.6, bz+Math.sin(-Math.atan2(dx,dz))*s2*10.4));
+      /* flanking posts at the head of each flight */
+      for(const s2 of [-1,1])
+        bag.add(new THREE.BoxGeometry(0.9,3.0,0.9), M.paleSand,
+          mat4(bx+ux*side*(steps)*1.7+Math.cos(ang)*s2*9.6, top+1.5, bz+uz*side*(steps)*1.7-Math.sin(ang)*s2*9.6));
     }
   }
   /* chai stalls and pretzel stands along the harbour quays */
@@ -2805,7 +2891,7 @@ buildVehicles();
 const VIEWS=[
   {id:'hero',    name:'Steamer deck',    pos:[-16,19.5,-122],  tgt:[90,52,250]},
   {id:'tajBank', name:'Taj, far bank',   pos:[34,30,252],    tgt:[150,48,250]},
-  {id:'tajGate', name:'Garden, from gate', pos:[362,118,250], tgt:[150,8,250]},
+  {id:'tajGate', name:'Garden, from gate', pos:[452,166,250], tgt:[150,14,250]},
   {id:'inAerial',name:'India aerial',    pos:[-430,360,1180], tgt:[330,10,620]},
   {id:'deAerial',name:'Germany aerial',  pos:[700,420,1500],  tgt:[-330,30,760]},
   {id:'gates',   name:'Harbour gates',   pos:[0,52,-236],    tgt:[0,30,20]},
@@ -2842,38 +2928,56 @@ DECK_GROUP.name='steamerDeck';
 
 /* ============================== river sail path ============================== */
 const SAIL=(()=>{
+  /* A short round trip on the estuary and the two harbour reaches: out at sea,
+     in past the mouth, up the Indian arm, back, up the German arm, back, and
+     out again. Kept on open water so the camera never meets a bank or a
+     terrace. Points are offset into the deepest water around each sample. */
   const pts=[];
-  const push=(x,z,lift)=>{
-    const y=Math.max(terrainH(x,z)+16, 6+lift);
-    pts.push(V3(x,y,z));
-  };
-  /* from the sea, up the shared reach, then the German arm and back down the Indian arm */
-  const seq=[
-    [R_SHARED, 16, 14], [R_GERMAN, -18, 12], [R_GERMAN, 18, 12],
-    [R_INDIAN, -18, 12], [R_INDIAN, 18, 12], [R_SHARED, -16, 14]
-  ];
-  for(const [poly,lane,lift] of seq){
-    for(let i=0;i<poly.length;i++){
-      const [x,z]=poly[i];
-      const prev=poly[Math.max(0,i-1)], next=poly[Math.min(poly.length-1,i+1)];
-      const dx=next[0]-prev[0], dz=next[1]-prev[1], dl=Math.hypot(dx,dz)||1;
-      push(x - dz/dl*lane, z + dx/dl*lane, lift);
+  const lane=(poly, toZ)=>{
+    for(let i=0;i<poly.length-1;i++){
+      const [x0,z0]=poly[i], [x1,z1]=poly[i+1];
+      if(z0>toZ && z1>toZ) continue;
+      const dx=x1-x0, dz=z1-z0, len=Math.hypot(dx,dz)||1;
+      const n=Math.max(1,Math.round(len/26));
+      for(let j=0;j<n;j++){
+        const t=j/n, x=lerp(x0,x1,t), z=lerp(z0,z1,t);
+        if(z>toZ) continue;
+        pts.push([x, z]);
+      }
     }
-  }
-  const curve=new THREE.CatmullRomCurve3(pts,false,'catmullrom',0.2);
+  };
+  const sharedIn=[[0,-1900],[0,-1500],[-10,-1100],[10,-700],[0,-300],[0,-40]];
+  lane(sharedIn, 300);
+  lane(R_INDIAN, 210);
+  lane([...R_INDIAN].reverse(), 210);
+  lane([...R_GERMAN].reverse(), 210);
+  lane(R_GERMAN, 210);
+  lane([...sharedIn].reverse(), 300);
+  /* snap to the channel centre, then smooth */
+  const deep=(x,z)=>{
+    let bx=x, bz=z, bh=terrainH(x,z);
+    for(let i=-2;i<=2;i++) for(let j=-2;j<=2;j++){
+      const px=x+i*10, pz=z+j*10, hh=terrainH(px,pz);
+      if(hh<bh){ bh=hh; bx=px; bz=pz; }
+    }
+    return [bx,bz];
+  };
+  const v=pts.map(([x,z])=>{ const [sx,sz]=deep(x,z); return V3(sx, 5.0, sz); });
+  const curve=new THREE.CatmullRomCurve3(v,false,'catmullrom',0.10);
   return {curve, len:curve.getLength()};
 })();
 const sailLook=new THREE.Vector3();
+window.__SAIL=SAIL;
 function updateSail(dt){
   if(!state.sail) return;
   if(state.sailPlay) state.sailT=(state.sailT+dt*0.010)%1;
   const u=clamp(state.sailT,0.001,0.999);
   sailLook.copy(SAIL.curve.getPointAt(u));
-  const ahead=SAIL.curve.getPointAt(Math.min(0.999,u+0.022));
-  /* keep the hull above the bank even where the terrain climbs */
-  const gy=Math.max(terrainH(sailLook.x,sailLook.z)+15, 7);
-  camera.position.set(sailLook.x, gy, sailLook.z);
-  controls.target.copy(ahead).setY(Math.max(ahead.y, gy-2)+4);
+  const ahead=SAIL.curve.getPointAt(Math.min(0.999,u+0.014));
+  /* ride a few metres above the water, lifting where the channel runs close to
+     a bank so the camera never ends up inside the ground */
+  camera.position.set(sailLook.x, 5.2, sailLook.z);
+  controls.target.set(ahead.x, 6.4, ahead.z);
   const rng=el('sailRange');
   if(rng && document.activeElement!==rng) rng.value=String(Math.round(state.sailT*1000));
 }
@@ -2920,7 +3024,7 @@ function applyLight(i){
   M.bulb.color.setHex(m.bulbs?0xffd98f:0x6b5a3a);
   M.lampWarm.color.setHex(m.lamps?0xffc978:0xb9a684);
   /* mist thickens at dawn, thins at night */
-  for(const mi of mists) mi.m.material.opacity = (i===1?0.075:i===2?0.02:i===3?0.03:0.028);
+  for(const mi of mists) mi.m.material.userData.base = (i===1?0.075:i===2?0.02:i===3?0.03:0.028);
   for(const b of ANIM.boats){ if(b.wake) b.wake.material.color.setHex(i>=2?0xbfd4f0:0xf4f8ff); }
   /* Taj colour shift: pearl-pink at dawn, white at noon, gold at sunset, blue-silver at night */
   const tajTip=[[0xfff2e4,0xffe8c8],[0xffe4da,0xf7e2d2],[0xc9d6ee,0xbcd0ee],[0xffd8a4,0xffcaa0],[0xffc892,0xffb489]][i];
