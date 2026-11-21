@@ -50,7 +50,11 @@ test/             Puppeteer harnesses used to build and verify the scene
   presets.js      screenshot arbitrary camera/target pairs
   modes.js        full UI smoke test (light, quality, density, sail, presets, photo mode)
   perf.js         render timing with and without instanced meshes
-  chunk*.js       the build chunks the single file was assembled from
+  sail.js         screenshots along the river-sail course
+  err.js          page errors / console warnings during boot
+  live.js         loads the deployed GitHub Pages URL and screenshots it
 ```
+
+**Live:** <https://sarang-cmd.github.io/two-rivers/>
 
 The harnesses need a local Chrome for Puppeteer and a static server; they were used under `/home/user/test` during development and expect the page to be reachable on a local port (each script starts its own).
